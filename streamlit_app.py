@@ -3,14 +3,6 @@ import re
 import json
 from datetime import datetime, date, time as dt_time
 from typing import Dict, Any, Optional
-import asyncio
-import os
-
-# Import your existing modules (you'll need to adapt these)
-# from src.rag_chain import ask_question
-# from src.calendar_utils import create_event
-# from src.email_utils import send_confirmation
-# from src.content_filter import GuardrailsManager
 
 # Configure Streamlit page
 st.set_page_config(
@@ -48,19 +40,6 @@ st.markdown("""
         border-left: 4px solid #4caf50;
     }
     
-    .error-message {
-        background-color: #ffebee;
-        border-left: 4px solid #f44336;
-    }
-    
-    .success-message {
-        background-color: #e8f5e8;
-        border-left: 4px solid #4caf50;
-        padding: 1rem;
-        border-radius: 5px;
-        margin: 1rem 0;
-    }
-    
     .clinic-info {
         background-color: #f5f5f5;
         padding: 1rem;
@@ -80,9 +59,6 @@ if "messages" not in st.session_state:
 
 if "booking_data" not in st.session_state:
     st.session_state.booking_data = {}
-
-if "booking_mode" not in st.session_state:
-    st.session_state.booking_mode = False
 
 # Simplified content filter for Streamlit
 class SimpleContentFilter:
@@ -322,92 +298,105 @@ def main():
     with col1:
         st.header("💬 Chat with PsychBot")
         
-        # Display chat messages
-        for message in st.session_state.messages:
-            if message["role"] == "user":
-                st.markdown(f"""
-                <div class="chat-message user-message">
-                    <strong>You:</strong> {message["content"]}
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown(f"""
-                <div class="chat-message bot-message">
-                    <strong>PsychBot:</strong> {message["content"]}
-                </div>
-                """, unsafe_allow_html=True)
+        # Chat container
+        chat_container = st.container()
+        
+        with chat_container:
+            # Display chat messages
+            for message in st.session_state.messages:
+                if message["role"] == "user":
+                    st.markdown(f"""
+                    <div class="chat-message user-message">
+                        <strong>You:</strong> {message["content"]}
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown(f"""
+                    <div class="chat-message bot-message">
+                        <strong>PsychBot:</strong> {message["content"]}
+                    </div>
+                    """, unsafe_allow_html=True)
         
         # Chat input
-        if prompt := st.chat_input("Ask about our services, Dr. Tan's credentials, or say 'book appointment'..."):
-            # Add user message
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            
-            # Check content filter
-            is_allowed, filter_response = content_filter.check_content(prompt)
-            
-            if not is_allowed:
-                response = filter_response
-            else:
-                # Check if this is a booking attempt
-                booking_keywords = ["book", "appointment", "schedule", "reserve"]
-                has_booking_info = any([
-                    re.search(r'\b[STFG]\d{7}[A-Z]\b', prompt.upper()),
-                    re.search(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', prompt),
-                    any(keyword in prompt.lower() for keyword in booking_keywords)
-                ])
+        user_input = st.text_input(
+            "Type your message:", 
+            placeholder="Ask about our services, Dr. Tan's credentials, or say 'book appointment'...",
+            key="user_input"
+        )
+        
+        if st.button("Send", key="send_button") or user_input:
+            if user_input:
+                # Add user message
+                st.session_state.messages.append({"role": "user", "content": user_input})
                 
-                if has_booking_info:
-                    # Extract booking info
-                    new_booking_info = extract_booking_info(prompt)
-                    st.session_state.booking_data.update(new_booking_info)
-                    
-                    # Check if complete
-                    is_complete, missing_fields = is_booking_complete(st.session_state.booking_data)
-                    
-                    if is_complete:
-                        response = process_booking(st.session_state.booking_data)
-                        # Clear booking data after successful booking
-                        st.session_state.booking_data = {}
-                    else:
-                        # Ask for missing info
-                        response_parts = ["Thank you! Let me check what else I need:\n"]
-                        
-                        if st.session_state.booking_data:
-                            response_parts.append("✅ **Information I have:**")
-                            for key, value in st.session_state.booking_data.items():
-                                if key == 'date':
-                                    formatted_date = datetime.strptime(value, '%Y-%m-%d').strftime('%B %d, %Y')
-                                    response_parts.append(f"• Date: {formatted_date}")
-                                elif key == 'time':
-                                    time_obj = datetime.strptime(value, '%H:%M').time()
-                                    formatted_time = time_obj.strftime('%I:%M %p')
-                                    response_parts.append(f"• Time: {formatted_time}")
-                                else:
-                                    response_parts.append(f"• {key.title()}: {value}")
-                            response_parts.append("")
-                        
-                        response_parts.append("❓ **Still need:**")
-                        field_prompts = {
-                            'name': "• Your full name",
-                            'nric': "• Your NRIC/FIN number (e.g., S1234567A)",
-                            'email': "• Your email address",
-                            'date': "• Preferred appointment date (e.g., August 15)",
-                            'time': "• Preferred appointment time (e.g., 3pm)"
-                        }
-                        
-                        for field in missing_fields:
-                            if field in field_prompts:
-                                response_parts.append(field_prompts[field])
-                        
-                        response_parts.append("\nPlease provide the missing information!")
-                        response = "\n".join(response_parts)
+                # Check content filter
+                is_allowed, filter_response = content_filter.check_content(user_input)
+                
+                if not is_allowed:
+                    response = filter_response
                 else:
-                    # Regular question
-                    response = get_clinic_response(prompt)
-            
-            # Add bot response
-            st.session_state.messages.append({"role": "assistant", "content": response})
-            st.experimental_rerun()
+                    # Check if this is a booking attempt
+                    booking_keywords = ["book", "appointment", "schedule", "reserve"]
+                    has_booking_info = any([
+                        re.search(r'\b[STFG]\d{7}[A-Z]\b', user_input.upper()),
+                        re.search(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', user_input),
+                        any(keyword in user_input.lower() for keyword in booking_keywords)
+                    ])
+                    
+                    if has_booking_info:
+                        # Extract booking info
+                        new_booking_info = extract_booking_info(user_input)
+                        st.session_state.booking_data.update(new_booking_info)
+                        
+                        # Check if complete
+                        is_complete, missing_fields = is_booking_complete(st.session_state.booking_data)
+                        
+                        if is_complete:
+                            response = process_booking(st.session_state.booking_data)
+                            # Clear booking data after successful booking
+                            st.session_state.booking_data = {}
+                        else:
+                            # Ask for missing info
+                            response_parts = ["Thank you! Let me check what else I need:\n"]
+                            
+                            if st.session_state.booking_data:
+                                response_parts.append("✅ **Information I have:**")
+                                for key, value in st.session_state.booking_data.items():
+                                    if key == 'date':
+                                        formatted_date = datetime.strptime(value, '%Y-%m-%d').strftime('%B %d, %Y')
+                                        response_parts.append(f"• Date: {formatted_date}")
+                                    elif key == 'time':
+                                        time_obj = datetime.strptime(value, '%H:%M').time()
+                                        formatted_time = time_obj.strftime('%I:%M %p')
+                                        response_parts.append(f"• Time: {formatted_time}")
+                                    else:
+                                        response_parts.append(f"• {key.title()}: {value}")
+                                response_parts.append("")
+                            
+                            response_parts.append("❓ **Still need:**")
+                            field_prompts = {
+                                'name': "• Your full name",
+                                'nric': "• Your NRIC/FIN number (e.g., S1234567A)",
+                                'email': "• Your email address",
+                                'date': "• Preferred appointment date (e.g., August 15)",
+                                'time': "• Preferred appointment time (e.g., 3pm)"
+                            }
+                            
+                            for field in missing_fields:
+                                if field in field_prompts:
+                                    response_parts.append(field_prompts[field])
+                            
+                            response_parts.append("\nPlease provide the missing information!")
+                            response = "\n".join(response_parts)
+                    else:
+                        # Regular question
+                        response = get_clinic_response(user_input)
+                
+                # Add bot response
+                st.session_state.messages.append({"role": "assistant", "content": response})
+                
+                # Clear the input by rerunning the app
+                st.rerun()
     
     with col2:
         st.header("📍 Clinic Information")
